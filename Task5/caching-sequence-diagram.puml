@@ -1,0 +1,90 @@
+@startuml
+!theme plain
+title Диаграмма последовательности: Кеширование в системе Александрит
+
+actor "Оператор" as Operator
+participant "MES" as MES
+participant "Redis Cache" as Redis
+database "Database" as DB
+
+== Сценарий 1: Чтение списка заказов (кеш промах) ==
+
+Operator -> MES: Запрос списка заказов
+activate MES
+
+MES -> Redis: Проверка кеша\n(ключ: "orders:list:page:1")
+activate Redis
+Redis --> MES: Кеш не найден
+deactivate Redis
+
+MES -> DB: SELECT * FROM orders\nWHERE status = 'active'
+activate DB
+DB --> MES: Список заказов
+deactivate DB
+
+MES -> Redis: Сохранение в кеш\n(TTL: 300 сек)
+activate Redis
+Redis --> MES: Подтверждение сохранения
+deactivate Redis
+
+MES --> Operator: Возврат списка заказов
+deactivate MES
+
+== Сценарий 2: Чтение списка заказов (кеш попадание) ==
+
+Operator -> MES: Запрос списка заказов
+activate MES
+
+MES -> Redis: Проверка кеша\n(ключ: "orders:list:page:1")
+activate Redis
+Redis --> MES: Данные из кеша
+deactivate Redis
+
+MES --> Operator: Возврат списка заказов\n(из кеша)
+deactivate MES
+
+== Сценарий 3: Изменение статуса заказа ==
+
+Operator -> MES: Изменение статуса заказа\n(id: 123, status: 'completed')
+activate MES
+
+MES -> DB: UPDATE orders SET status = 'completed'\nWHERE id = 123
+activate DB
+DB --> MES: Подтверждение обновления
+deactivate DB
+
+MES -> Redis: Удаление кеша\n(ключ: "orders:list:*")
+activate Redis
+Redis --> MES: Подтверждение удаления
+deactivate Redis
+
+MES -> Redis: Удаление кеша\n(ключ: "order:123")
+activate Redis
+Redis --> MES: Подтверждение удаления
+deactivate Redis
+
+MES --> Operator: Подтверждение изменения статуса
+deactivate MES
+
+== Сценарий 4: Расчет стоимости (кеширование результатов) ==
+
+Operator -> MES: Запрос расчета стоимости\n(заказ: 123, файл: model.stl)
+activate MES
+
+MES -> Redis: Проверка кеша расчета\n(ключ: "price:calc:hash123")
+activate Redis
+Redis --> MES: Кеш не найден
+deactivate Redis
+
+MES -> MES: Выполнение расчета стоимости\n(2-3 минуты)
+note right: Дорогая операция\nс 3D моделью
+
+MES -> Redis: Сохранение результата\n(TTL: 1 час)
+activate Redis
+Redis --> MES: Подтверждение сохранения
+deactivate Redis
+
+MES --> Operator: Результат расчета\n(цена: 15000 руб)
+deactivate MES
+
+@enduml
